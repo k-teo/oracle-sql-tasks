@@ -156,3 +156,24 @@ CONNECT BY nickname = PRIOR chief
   WHERE mice_extra IS NOT NULL 
 CONNECT BY PRIOR nickname = chief
   START WITH function IN ('BOSS');
+
+/*  Task 17. Display nicknames, rations of mice and band names for cats with a ration of mice 
+    greater than 50 which operate in FIELD area. Take into account the fact that there are cats 
+    with the right to hunt in the whole area "served" by the herd. Do not use subqueries. */
+SELECT C.nickname "Hunts in the field", C.mice_ration "Ration of mice", B.name "Band"
+  FROM Cats C 
+  JOIN Bands B 
+    ON C.band_no = B.band_no
+ WHERE C.mice_ration > 50 
+   AND B.site IN ('FIELD', 'WHOLE AREA')
+ ORDER BY 2 DESC ;
+
+
+/*  Task 18. Display, without using a subquery, the names and dates of joining the herd of cats 
+    that joined the herd before the cat named "JACEK". Sort the results descending by date of joining the herd. */
+SELECT C2.name "Name", TO_CHAR(c2.in_herd_since, 'YYYY-MM-DD') "Hunt since"
+  FROM Cats C1 
+  JOIN Cats C2 
+    ON C1.name = 'JACEK'
+ WHERE C1.in_herd_since > C2.in_herd_since
+ ORDER BY 2 DESC;
