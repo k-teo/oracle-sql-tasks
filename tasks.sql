@@ -644,3 +644,773 @@ FROM
        ON C.band_no = B.band_no
     GROUP BY B.name, gender)
  ORDER BY 1, 2;
+
+
+/*  Task 34. Write a PL/SQL block that selects cats performing the function given on the keyboard. 
+    The only effect of block operation is to be a message informing whether or not a cat performing 
+    the given function has been found (if a cat is found, display the name of the appropriate function).*/  
+    
+DECLARE
+    v_function Cats.function%TYPE := '&function';
+    f Cats.function%TYPE;
+BEGIN
+    SELECT function
+      INTO f
+      FROM Cats
+     WHERE function = v_function;
+DBMS_OUTPUT.PUT_LINE(v_function || ' - function found once');
+EXCEPTION
+    WHEN TOO_MANY_ROWS THEN DBMS_OUTPUT.PUT_LINE(v_function || ' - function found more than once');
+    WHEN NO_DATA_FOUND THEN DBMS_OUTPUT.PUT_LINE(v_function || ' - function not found');
+END;
+/
+
+/*  Task 35. Write a PL/SQL block that displays the following information about the cat with a nickname 
+    entered from the keyboard (depending on the actual data):
+    -	'total annual mice ration > 700'
+    -	'name contains the letter A'
+    -	'May is the month of joining the herd'
+    -	'does not match the criteria'.
+    The above information is listed according to its hierarchy of importance. Precede each entry with the cat's name.
+*/
+
+DECLARE
+    v_nickname Cats.nickname%TYPE := '&nickname';
+    cat Cats%ROWTYPE;
+BEGIN
+    SELECT *
+      INTO cat
+      FROM Cats
+     WHERE nickname = v_nickname;
+     
+     DBMS_OUTPUT.PUT_LINE(cat.nickname);
+     
+     CASE
+          WHEN ((cat.mice_ration + NVL(cat.mice_extra, 0)) * 12 > 700) THEN DBMS_OUTPUT.PUT_LINE(cat.name || ' Total annual mice ration > 700');
+          WHEN (cat.name LIKE '%A%') THEN DBMS_OUTPUT.PUT_LINE(cat.name || ' Name contains the letter A');
+          WHEN (EXTRACT(MONTH FROM cat.in_herd_since) = 5 ) THEN DBMS_OUTPUT.PUT_LINE(cat.name || ' May is the month of joining the herd');
+          ELSE DBMS_OUTPUT.PUT_LINE(cat.nickname || ' Does not match any criteria');
+      END CASE;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN DBMS_OUTPUT.PUT_LINE(v_nickname);
+                            DBMS_OUTPUT.PUT_LINE(cat.nickname || ' Does not match any criteria');
+END;
+/
+
+/*  Task 36. Due to the high efficiency in hunting mice, SZEFUNIO decided to reward his subordinates. 
+    So he announced that he increases the individual mice ration of each cat by 10%, in order from the cat 
+    with the lowest ration to the cat with the highest ration. He also determined that the process of increasing 
+    the mice rations should be completed when the sum of all rations of all cats exceeds 1050. If for a cat, 
+    the mouse ration after the increase exceeds the maximum value due to the function (max_mice from the Functions relation), 
+    the mouse allocation after the increase should be equal to this value (max_mice). Write a PL/SQL block with a cursor 
+    that performs this task. The block is to operate until the sum of all rations actually exceeds 1050 
+    (the number of "increase cycles" may be greater than 1 and thus the individual increase may be greater than 10%). 
+    Display the sum of mouse rations on the screen after completing the task along with the number of 
+    modifications in the Cats relation. Finally, roll back all changes. */
+DECLARE
+    CURSOR food 
+        IS 
+    SELECT nickname, mice_ration, max_mice
+      FROM Cats 
+      JOIN Functions 
+     USING (function)
+     ORDER BY mice_ration
+       FOR UPDATE OF mice_ration;
+     
+    counter NUMBER := 0;
+    sum_ration NUMBER := 0;
+    current_cat food%ROWTYPE;
+BEGIN
+    OPEN food;
+    
+        LOOP
+            FETCH food INTO current_cat;
+            
+            IF food%NOTFOUND = TRUE THEN
+                CLOSE food;
+                OPEN food;
+                CONTINUE;
+            END IF;
+            
+            SELECT SUM(mice_ration)
+              INTO sum_ration
+              FROM Cats;
+            
+            EXIT WHEN (sum_ration > 1050);
+            
+            IF current_cat.mice_ration * 1.1 < current_cat.max_mice THEN
+                UPDATE Cats
+                   SET mice_ration = 1.1 * mice_ration
+                 WHERE nickname = current_cat.nickname;
+                 counter := counter + 1;
+            ELSIF current_cat.mice_ration < current_cat.max_mice THEN
+                UPDATE Cats
+                   SET mice_ration = current_cat.max_mice
+                 WHERE nickname = current_cat.nickname;
+                 counter := counter + 1;
+            END IF;
+        END LOOP;
+    
+    CLOSE food;
+    DBMS_OUTPUT.PUT_LINE('Total ration ' || sum_ration || ' Changes - ' || counter);
+END;
+/
+
+ROLLBACK;
+
+
+/*  Task 37. Write a block that selects five cats with the highest total mouse allocation 
+    using FOR loop with cursor. Display the result on the screen. */
+DECLARE
+    CURSOR food
+        IS
+    SELECT nickname, (mice_ration + NVL(mice_extra, 0)) AS eats
+      FROM Cats
+     ORDER BY 2 DESC
+     FETCH NEXT 5 ROWS ONLY;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE(RPAD('NAME', 10) || RPAD('|', 3) || 'EATS');
+    DBMS_OUTPUT.PUT_LINE('----------------');
+    FOR cat IN food LOOP
+        DBMS_OUTPUT.PUT_LINE(RPAD(cat.nickname, 10) || RPAD('|', 3) || cat.eats);
+    END LOOP;
+END;
+/
+
+/*  Task 38. Write a block that will implement version a. or b. of task 19 in a universal way 
+    (without having to take into account knowledge about the depth of the tree). The input value is 
+    to be the maximum number of supervisors to display. */
+
+DECLARE
+    CURSOR cats_chief
+        IS
+    SELECT name, chief
+      FROM Cats
+     WHERE function = 'CAT' OR function = 'NICE'
+     ORDER BY 2 DESC;
+     header_row VARCHAR2(2000) := '';
+     chief_row VARCHAR2(2000);
+     break_row VARCHAR2(2000) := '----------';
+     supervisors_num NUMBER := '&num';
+     current_chief cats_chief%ROWTYPE;
+     max_chief NUMBER := 0;
+BEGIN
+    header_row := RPAD('Name', 8) || RPAD('|', 3);
+    FOR cat IN cats_chief LOOP
+        current_chief := cat;
+        FOR i IN 1..supervisors_num LOOP
+            IF (i > max_chief) THEN
+                    max_chief := i;
+            END IF;
+            SELECT name, chief
+                  INTO current_chief
+                  FROM Cats
+                 WHERE nickname = current_chief.chief;
+            EXIT WHEN current_chief.chief IS NULL;
+        END LOOP;
+    END LOOP;
+    FOR j IN 1..max_chief LOOP
+        header_row := header_row || 'Chief ' || RPAD(j, 2) || RPAD('|', 3);
+        break_row := break_row || '-----------';
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE(header_row);
+    DBMS_OUTPUT.PUT_LINE(break_row);
+    
+    FOR cat IN cats_chief LOOP
+        current_chief := cat;
+        chief_row := RPAD(cat.name, 8);
+        FOR i IN 1..max_chief LOOP
+            IF current_chief.chief IS NOT NULL THEN
+                SELECT name, chief
+                  INTO current_chief
+                  FROM Cats
+                 WHERE nickname = current_chief.chief;
+                chief_row := chief_row || RPAD('|', 3) || RPAD(current_chief.name, 8);
+            END IF;
+        END LOOP;
+        DBMS_OUTPUT.PUT_LINE(chief_row || RPAD('|', 3));
+    END LOOP;
+END;
+/
+
+/*  Task 39. Write a PL/SQL block loading three parameters representing the band number, band name and hunting site. 
+    The script is to prevent entering existing parameter values by handling the appropriate exceptions. Entering 
+    the band number <= 0 is also an exceptional situation. In the event of an exceptional situation, an appropriate 
+    message should be displayed on the screen. If the parameters are correct, create a new band in the Bands relation. 
+    The change should be roll backed at the end. */
+CREATE 
+UNIQUE INDEX unique_names 
+    ON Bands(name);
+DECLARE
+    v_band_number NUMBER := '&band_num';
+    v_band_name VARCHAR2(20) := '&name';
+    v_hunting_site VARCHAR2(20) := '&site';
+    is_unique NUMBER;
+    error_message VARCHAR(200) := '';
+    LOWER_THAN_ZERO EXCEPTION;
+BEGIN
+    IF (v_band_number <= 0) THEN 
+        RAISE LOWER_THAN_ZERO;
+    END IF;
+    
+    SELECT COUNT(*) 
+      INTO is_unique 
+      FROM Bands
+     WHERE band_no = v_band_number;
+    IF (is_unique > 0) THEN 
+        error_message := v_band_number || ',';
+    END IF;
+    SELECT COUNT(*) 
+      INTO is_unique 
+      FROM Bands 
+     WHERE name = v_band_name;
+    IF (is_unique > 0) THEN 
+        error_message := error_message || v_band_name || ', '; 
+    END IF;
+    SELECT COUNT(*) 
+      INTO is_unique 
+      FROM Bands 
+     WHERE site = v_hunting_site;
+    IF (is_unique > 0) THEN 
+        error_message := error_message || v_hunting_site; 
+    END IF;
+    INSERT 
+      INTO Bands 
+    VALUES (v_band_number, v_band_name, v_hunting_site, NULL);
+EXCEPTION
+    WHEN DUP_VAL_ON_INDEX THEN DBMS_OUTPUT.PUT_LINE(error_message || ' ' || 'Already exists');
+    WHEN LOWER_THAN_ZERO THEN DBMS_OUTPUT.PUT_LINE('<= 0 !');
+END;
+/
+
+ROLLBACK;
+
+/*  Task 40. Convert block from Task 39 into a procedure named new_band, stored in the database. */
+CREATE OR REPLACE PROCEDURE new_band(v_band_number IN Bands.band_no%TYPE, v_band_name IN Bands.name%TYPE, v_hunting_site IN Bands.site%TYPE)
+    IS
+        is_unique NUMBER;
+        error_message VARCHAR(200) := '';
+        LOWER_THAN_ZERO EXCEPTION;
+    BEGIN
+        IF (v_band_number <= 0) THEN 
+            RAISE LOWER_THAN_ZERO;
+        END IF;
+        
+        SELECT COUNT(*) 
+          INTO is_unique 
+          FROM Bands
+         WHERE band_no = v_band_number;
+        IF (is_unique > 0) THEN 
+            error_message := v_band_number || ', ';
+        END IF;
+        SELECT COUNT(*) 
+          INTO is_unique 
+          FROM Bands 
+         WHERE name = v_band_name;
+        IF (is_unique > 0) THEN 
+            error_message := error_message || v_band_name || ', '; 
+        END IF;
+        SELECT COUNT(*) 
+          INTO is_unique 
+          FROM Bands 
+         WHERE site = v_hunting_site;
+        IF (is_unique > 0) THEN 
+            error_message := error_message || v_hunting_site; 
+        END IF;
+        INSERT 
+          INTO Bands 
+        VALUES (v_band_number, v_band_name, v_hunting_site, NULL);
+    EXCEPTION
+        WHEN DUP_VAL_ON_INDEX THEN DBMS_OUTPUT.PUT_LINE(error_message || ' ' || 'Already exists');
+        WHEN LOWER_THAN_ZERO THEN DBMS_OUTPUT.PUT_LINE('<= 0 !');
+END new_band; 
+/
+
+---------------------
+EXEC new_band(7,'PINTO HUNTERS','HILLOCK');
+EXEC new_band(0,'NEW','CELLAR');
+EXEC new_band(6,'NEW','CELLAR');
+
+SELECT * 
+  FROM Bands;
+
+
+/*  Task 41. Define a trigger that ensures that the number of the new band will always be 1 greater than 
+    the highest number of the existing band. Check the result of the trigger operation using the procedure from Task 40. */
+
+CREATE OR REPLACE TRIGGER band_no_trigger
+BEFORE INSERT
+    ON Bands
+   FOR EACH ROW
+DECLARE 
+    last_index Bands.band_no%TYPE;
+BEGIN
+    SELECT MAX(band_no)
+      INTO last_index
+      FROM Bands;
+    :NEW.band_no := last_index + 1;
+END;
+/
+
+---------------------
+EXEC new_band(7,'NEW','CELLAR');
+
+SELECT * 
+  FROM Bands;
+  
+/*  Task 42. Female cats with function Nice decided to take care of their maters. So they hired IT to enter 
+    the virus into the Tiger's system. Now, with every attempt to change the mice ration for Nice for a plus 
+    (for minus there is no question at all) by a value less than 10% of the mice ration of Tiger, 
+    the regret of Nice caused by this must be comforted by an increase of their ration by this value as well as 
+    an increase in extra mice by 5. Additionally, Tiger is to be punished by the loss of these 10%. However, 
+    if the increase is satisfactory for Nice, the Tiger ration extra of mice is to increase by 5.
+
+    Propose two solutions of this task that will bypass the basic limitation for a row trigger activated 
+    by a DML command, ie the inability to read or change the relation on which the operation (DML command) 
+    activates this trigger. In the first (classic) solution, use several triggers and memory in the form 
+    of a package specification dedicated to the task, in the second, use the COMPOUND trigger.
+
+    Provide examples of how triggers work, and then remove any changes they make. */
+
+--1
+CREATE OR REPLACE PACKAGE virus_package AS
+    tiger_ration Cats.mice_ration%TYPE;
+    is_tiger_update NUMBER := 0;
+    cat_function Cats.function%TYPE;
+END;
+/
+
+CREATE OR REPLACE TRIGGER virus_bs_trigger
+BEFORE UPDATE 
+    OF mice_ration
+    ON Cats
+BEGIN
+    SELECT mice_ration
+      INTO virus_package.tiger_ration
+      FROM Cats
+     WHERE nickname = 'TIGER';
+END;
+/
+
+CREATE OR REPLACE TRIGGER virus_ber_trigger
+BEFORE UPDATE 
+    OF mice_ration
+    ON Cats
+   FOR EACH ROW
+  WHEN (NEW.function = 'NICE')
+BEGIN
+    virus_package.cat_function := 'NICE';
+    IF (:NEW.mice_ration < :OLD.mice_ration) THEN
+        :NEW.mice_ration := :OLD.mice_ration;
+    ELSIF (:NEW.mice_ration - :OLD.mice_ration < 0.1 * virus_package.tiger_ration) THEN
+        :NEW.mice_extra := :NEW.mice_extra + 5;
+        virus_package.is_tiger_update := -1;
+    ELSE
+        virus_package.is_tiger_update := 1;
+    END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER virus_as_trigger
+ AFTER UPDATE 
+    OF mice_ration
+    ON Cats
+BEGIN
+    IF (virus_package.cat_function = 'NICE') THEN
+        virus_package.cat_function := 'BOSS';
+        IF (virus_package.is_tiger_update = -1) THEN
+            UPDATE Cats
+               SET mice_ration = mice_ration * 0.9
+             WHERE nickname = 'TIGER';
+        ELSIF (virus_package.is_tiger_update = 1) THEN
+            UPDATE Cats
+               SET mice_extra = mice_extra + 5 
+             WHERE nickname = 'TIGER';
+        END IF;
+        virus_package.is_tiger_update := 0;
+    END IF;
+END;
+/
+
+
+--2
+CREATE OR REPLACE TRIGGER compound_virus_trigger
+   FOR UPDATE 
+    OF mice_ration
+    ON Cats
+  WHEN (NEW.function = 'NICE')
+COMPOUND TRIGGER
+    tiger_ration Cats.mice_ration%TYPE;
+    is_tiger_update NUMBER := 0;
+   
+    BEFORE STATEMENT IS
+    BEGIN
+        SELECT mice_ration
+          INTO tiger_ration
+          FROM Cats
+         WHERE nickname = 'TIGER';
+    END BEFORE STATEMENT;
+   
+    BEFORE EACH ROW IS
+    BEGIN
+        IF (:NEW.mice_ration < :OLD.mice_ration) THEN
+            :NEW.mice_ration := :OLD.mice_ration;
+        ELSIF (:NEW.mice_ration - :OLD.mice_ration < 0.1 * tiger_ration) THEN
+            :NEW.mice_extra := :NEW.mice_extra + 5;
+            is_tiger_update := -1;
+        ELSE
+            is_tiger_update := 1;
+        END IF;
+    END BEFORE EACH ROW;
+   
+    AFTER STATEMENT IS
+    BEGIN
+        IF (is_tiger_update = -1) THEN
+            UPDATE Cats
+               SET mice_ration = mice_ration * 0.9
+             WHERE nickname = 'TIGER';
+        ELSIF (is_tiger_update = 1) THEN
+            UPDATE Cats
+               SET mice_extra = mice_extra + 5 
+             WHERE nickname = 'TIGER';
+        END IF;
+    END AFTER STATEMENT;
+END compound_virus_trigger;
+
+-----------------------------------
+UPDATE Cats 
+   SET mice_ration = mice_ration + 5
+ WHERE nickname = 'MISS';  
+
+UPDATE Cats 
+   SET mice_ration = mice_ration + 16
+ WHERE nickname = 'MISS';  
+ 
+ UPDATE Cats 
+   SET mice_ration = mice_ration - 5
+ WHERE nickname = 'MISS';  
+
+ROLLBACK;
+DROP TRIGGER virus_bs_trigger;
+DROP TRIGGER virus_ber_trigger;
+DROP TRIGGER virus_as_trigger;
+DROP TRIGGER compound_virus_trigger;
+
+/*  Task 43. Write a block that will carry out Task 33 in a universal way 
+    (without having to take into account knowledge of the functions performed by cats). */
+DECLARE
+    CURSOR bands_names
+        IS
+    SELECT band_no, name
+      FROM Bands
+     WHERE band_chief IS NOT NULL;
+      
+    CURSOR functions
+        IS
+    SELECT DISTINCT function
+      FROM Cats;
+      
+      count_cats NUMBER;
+      v_sum NUMBER;
+      total_sum NUMBER;
+      m_functions VARCHAR2(2000);
+      f_functions VARCHAR2(2000);
+      header_line VARCHAR2(2000);
+      func_name VARCHAR2(200);
+      last_line VARCHAR2(200);
+BEGIN
+    header_line := RPAD('NAME', 15) || RPAD('GENDER', 15) || RPAD('HOW MANY', 15);
+    FOR func IN functions LOOP
+        SELECT DISTINCT function
+          INTO func_name
+          FROM Cats
+         WHERE function = func.function;
+        header_line := header_line || RPAD(func_name, 15);
+    END LOOP;
+    header_line := header_line || RPAD('SUM', 15);
+    DBMS_OUTPUT.PUT_LINE(header_line);
+    
+    FOR band IN bands_names LOOP
+            f_functions := RPAD(band.name, 15);
+        
+            SELECT NVL(COUNT(*), 0)
+              INTO count_cats
+              FROM Cats
+             WHERE band_no = band.band_no
+               AND gender = 'W';
+               
+            f_functions := f_functions || RPAD('Female', 15) || RPAD(count_cats, 15);
+               
+            FOR func IN functions LOOP
+                SELECT NVL(SUM(mice_ration + NVL(mice_extra, 0)), 0)
+                  INTO v_sum
+                  FROM Cats
+                 WHERE function = func.function
+                   AND band_no = band.band_no
+                   AND gender = 'W';
+
+                f_functions := f_functions || RPAD(v_sum, 15);
+            END LOOP;
+            
+            SELECT NVL(SUM(mice_ration + NVL(mice_extra, 0)), 0)
+              INTO v_sum
+              FROM Cats
+             WHERE band_no = band.band_no
+               AND gender = 'W';
+            
+            f_functions := f_functions || RPAD(v_sum, 15);
+            m_functions := RPAD(band.name, 15);
+        
+            SELECT NVL(COUNT(*), 0)
+              INTO count_cats
+              FROM Cats
+             WHERE band_no = band.band_no
+               AND gender = 'M';
+               
+            m_functions := m_functions || RPAD('Male', 15) || RPAD(count_cats, 15);
+               
+            FOR func IN functions LOOP
+                SELECT NVL(SUM(mice_ration + NVL(mice_extra, 0)), 0)
+                  INTO v_sum
+                  FROM Cats
+                 WHERE function = func.function
+                   AND band_no = band.band_no
+                   AND gender = 'M';
+
+                m_functions := m_functions || RPAD(v_sum, 15);
+                
+            END LOOP;
+            
+            SELECT NVL(SUM(mice_ration + NVL(mice_extra, 0)), 0)
+              INTO v_sum
+              FROM Cats
+             WHERE band_no = band.band_no
+               AND gender = 'M';
+               
+            m_functions := m_functions || RPAD(v_sum, 15);
+            
+            DBMS_OUTPUT.PUT_LINE(f_functions);
+            DBMS_OUTPUT.PUT_LINE(m_functions);
+    END LOOP;
+    
+    last_line := RPAD('EATS IN TOTAL', 45);
+    total_sum := 0;
+    FOR func IN functions LOOP
+        SELECT NVL(SUM(mice_ration + NVL(mice_extra, 0)), 0)
+          INTO v_sum
+          FROM Cats
+         WHERE function = func.function;
+        total_sum := total_sum + v_sum;
+        last_line := last_line || RPAD(v_sum, 15);
+    END LOOP;
+    last_line := last_line || RPAD(total_sum, 15);
+    DBMS_OUTPUT.PUT_LINE(last_line);
+    
+END;
+
+
+/*  Task 44. The tiger was concerned about the inexplicable reduction in mice supplies. 
+    So he decided to introduce a head tax that would top up the pantry. So he ordered 
+    that every cat is obliged to donate 5% (rounded up) of their total mice income. In addition, from what will remain:
+    - cats without subordinates give two mice for their incompetence during applying for promotion,
+    - cats without enemies give one mouse for too much agreeableness,
+    - cats pay an additional tax, the form of which is determined by the contractor of the task.
+    Write a function whose parameter is the cat's nickname, determining the cat's head tax due. 
+    This function together with the procedure from the Task 40 should be included 
+    in the one package and then used to determine the tax for all cats. */
+
+CREATE OR REPLACE PACKAGE taxes_package AS
+     FUNCTION get_tax(cat_nickname Cats.nickname%TYPE) RETURN NUMBER;
+    PROCEDURE new_band (v_band_number IN Bands.band_no%TYPE, v_band_name IN Bands.name%TYPE, v_hunting_site IN Bands.site%TYPE);
+END; 
+/
+
+CREATE OR REPLACE PACKAGE BODY taxes_package IS 
+FUNCTION get_tax(cat_nickname Cats.nickname%TYPE) RETURN NUMBER
+AS
+    sum_taxes NUMBER;
+    counter NUMBER;
+BEGIN
+    SELECT ROUND(SUM(mice_ration+NVL(mice_extra,0)) * 0.05) 
+      INTO sum_taxes
+      FROM Cats 
+     WHERE nickname = cat_nickname;
+     
+    SELECT COUNT(*) 
+      INTO counter 
+      FROM Cats 
+     WHERE chief = cat_nickname;
+     
+    IF counter = 0 THEN 
+        sum_taxes := sum_taxes + 2;
+    END IF;
+     
+    SELECT COUNT(*) 
+      INTO counter 
+      FROM Cats C 
+      JOIN Incidents I 
+        ON C.nickname = I.nickname 
+     WHERE C.nickname = cat_nickname;
+       
+    IF counter = 0 THEN 
+        sum_taxes := sum_taxes + 1;
+    END IF;
+    RETURN sum_taxes;
+END; 
+
+PROCEDURE new_band (v_band_number IN Bands.band_no%TYPE, v_band_name IN Bands.name%TYPE, v_hunting_site IN Bands.site%TYPE)
+    IS
+        is_unique NUMBER;
+        error_message VARCHAR(200) := '';
+        LOWER_THAN_ZERO EXCEPTION;
+    BEGIN
+        IF (v_band_number <= 0) THEN 
+            RAISE LOWER_THAN_ZERO;
+        END IF;
+        
+        SELECT COUNT(*) 
+          INTO is_unique 
+          FROM Bands
+         WHERE band_no = v_band_number;
+        IF (is_unique > 0) THEN 
+            error_message := v_band_number || ', ';
+        END IF;
+        SELECT COUNT(*) 
+          INTO is_unique 
+          FROM Bands 
+         WHERE name = v_band_name;
+        IF (is_unique > 0) THEN 
+            error_message := error_message || v_band_name || ', '; 
+        END IF;
+        SELECT COUNT(*) 
+          INTO is_unique 
+          FROM Bands 
+         WHERE site = v_hunting_site;
+        IF (is_unique > 0) THEN 
+            error_message := error_message || v_hunting_site; 
+        END IF;
+        INSERT 
+          INTO Bands 
+        VALUES (v_band_number, v_band_name, v_hunting_site, NULL);
+    EXCEPTION
+        WHEN DUP_VAL_ON_INDEX THEN DBMS_OUTPUT.PUT_LINE(error_message || ' ' || 'Already exists');
+        WHEN LOWER_THAN_ZERO THEN DBMS_OUTPUT.PUT_LINE('<= 0 !');
+    END new_band; 
+END;
+/  
+
+--------------
+DECLARE
+BEGIN
+  DBMS_OUTPUT.PUT_LINE(RPAD('TIGER', 10)|| taxes_package.get_tax('TIGER'));
+END;
+/
+
+/*  Task 45. The Tiger noticed strange changes in the value of his private mice ration (see Task 42). 
+    He was not worried about the positive changes but those in the negative were, in his opinion, inadmissible. 
+    So he motivated one of his spies to act and thanks to this he discovered Nice's evil practices (Task 42). 
+    So he instructed his computer scientist to construct a mechanism which would write in the Extra_additions relation 
+    (see Lectures - part 2)  -10 mice for each Nice (minus ten) when changing to plus any of the Nice mice ration made 
+    by an operator other than he himself. Propose such a mechanism, in lieu of the computer scientist. In the solution 
+    use the LOGIN_USER function (which returns the user name activating the trigger) and elements of dynamic SQL. */
+
+CREATE TABLE Extra_additions(
+    id NUMBER PRIMARY KEY,
+    nickname VARCHAR2(15) CONSTRAINT fk_extra_cats REFERENCES Cats(nickname),
+    mice_extra NUMBER
+);
+/
+
+   CREATE SEQUENCE counter
+    START WITH 1
+INCREMENT BY 1;
+/
+
+CREATE OR REPLACE TRIGGER antivirus_trigger
+ AFTER UPDATE OF mice_ration
+    ON Cats
+   FOR EACH ROW
+  WHEN (OLD.function = 'NICE')
+DECLARE
+    login VARCHAR2(30) := LOGIN_USER;
+BEGIN
+    IF(:NEW.mice_ration > :OLD.mice_ration AND login <> 'TIGER') THEN
+        INSERT 
+        INTO Extra_additions 
+        VALUES (counter.NEXTVAL, :OLD.nickname, -10);
+    END IF;
+END;
+/
+
+---------------------------
+UPDATE Cats 
+   SET mice_ration = mice_ration + 5
+ WHERE nickname = 'MISS';  
+ 
+SELECT *
+  FROM Extra_additions;
+
+DROP TABLE Extra_additions;
+DROP TRIGGER antivirus_trigger;
+DROP SEQUENCE counter;
+
+/*  Task 46. Write a trigger which will prevent the cat from being allocated a number of mice outside the range 
+    (min_mice, max_mice) specified for each function in the Functions relation. Each attempt to go beyond the applicable 
+    range is to be additionally monitored in a separate relation (who, when, which cat, which operation). */
+
+CREATE TABLE Mice_regulation(
+    id NUMBER PRIMARY KEY,
+    update_time DATE,
+    nickname VARCHAR2(15) CONSTRAINT fk_regulation_cats REFERENCES Cats(nickname),
+    is_upper_bound VARCHAR2(1) CONSTRAINT bound_nn NOT NULL
+                               CONSTRAINT regulation_bound_ch CHECK (is_upper_bound IN ('T','F'))
+);
+/
+
+CREATE SEQUENCE mice_regulation_id
+    START WITH 1
+INCREMENT BY 1;
+
+CREATE OR REPLACE TRIGGER mice_range_trigger
+BEFORE UPDATE 
+    OF mice_ration
+    ON Cats
+   FOR EACH ROW
+DECLARE
+   cat_ration Functions%ROWTYPE;
+BEGIN
+    SELECT function, min_mice, max_mice
+      INTO cat_ration
+      FROM Functions
+     WHERE function = :OLD.function;
+     
+    IF (:NEW.mice_ration > cat_ration.max_mice) THEN
+        
+        :NEW.mice_ration := cat_ration.max_mice;
+        INSERT 
+          INTO Mice_regulation 
+        VALUES (mice_regulation_id.NEXTVAL, SYSDATE, :OLD.nickname, 'T');
+    ELSIF (:NEW.mice_ration < cat_ration.min_mice) THEN
+        :NEW.mice_ration := cat_ration.min_mice;
+        INSERT 
+          INTO Mice_regulation 
+        VALUES (mice_regulation_id.NEXTVAL, SYSDATE, :OLD.nickname, 'F');
+    END IF;
+END;
+/
+
+-----------------------
+UPDATE Cats 
+   SET mice_ration = 0
+ WHERE nickname = 'BALD';  
+
+UPDATE Cats 
+   SET mice_ration = 300
+ WHERE nickname = 'BALD';  
+
+SELECT *
+  FROM Mice_regulation;
+
+ROLLBACK;
+
+DROP TRIGGER mice_range_trigger;
