@@ -94,4 +94,7 @@ Terms used in tasks:
 >
 - ROWNUM
 - OFFSET FETCH
-
+>
+- CURSOR
+- TRIGGER
+- PACKAGE
